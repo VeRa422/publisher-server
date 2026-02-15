@@ -11,7 +11,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// ===== НАСТРОЙКИ (ТОЛЬКО В RENDER) =====
+// ===== НАСТРОЙКИ =====
 const PORT = process.env.PORT || 3000;
 const GH_TOKEN = process.env.GH_TOKEN;
 const GH_OWNER = process.env.GH_OWNER;
@@ -43,7 +43,7 @@ app.post("/publish", async (req, res) => {
 
     const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
 
-    // Расширение файла: html или json
+    // Поддержка .html и .json файлов
     const fileExt = (ext === "html") ? "html" : "json";
     const filePath = `${PATH_PREFIX}/${safeId}.${fileExt}`;
 
@@ -52,7 +52,7 @@ app.post("/publish", async (req, res) => {
       "Accept": "application/vnd.github+json"
     };
 
-    // Проверяем существует ли файл (нужен sha для обновления)
+    // Проверяем существует ли файл
     const getUrl = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}?ref=${GH_BRANCH}`;
     let sha = null;
     const getResp = await fetch(getUrl, { headers });
@@ -61,7 +61,7 @@ app.post("/publish", async (req, res) => {
       sha = j.sha;
     }
 
-    // Если HTML — data уже строка, если JSON — нужен stringify
+    // HTML = строка как есть, JSON = stringify
     let fileContent;
     if (fileExt === "html") {
       fileContent = typeof data === "string" ? data : JSON.stringify(data);
@@ -88,7 +88,7 @@ app.post("/publish", async (req, res) => {
     if (!putResp.ok) {
       const errText = await putResp.text();
       console.error("GitHub API error:", putResp.status, errText);
-      return res.status(500).json({ ok: false, error: "GitHub API: " + putResp.status });
+      return res.status(500).json({ ok: false, error: "Storage error: " + putResp.status });
     }
 
     res.json({
