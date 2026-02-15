@@ -1,7 +1,6 @@
 import express from "express";
-
 const app = express();
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "10mb" }));
 
 // ===== CORS =====
 app.use((req, res, next) => {
@@ -32,36 +31,47 @@ app.get("/health", (req, res) => res.status(200).send("ok"));
 app.post("/publish", async (req, res) => {
   try {
     if (req.header("X-Publish-Key") !== PUBLISH_KEY) {
-      return res.status(401).json({ ok:false, error:"Bad publish key" });
+      return res.status(401).json({ ok: false, error: "Bad publish key" });
     }
 
     mustEnv("GH_TOKEN", GH_TOKEN);
     mustEnv("GH_OWNER", GH_OWNER);
     mustEnv("GH_REPO", GH_REPO);
 
-    const { id, data } = req.body || {};
-    if (!id || !data) return res.status(400).json({ ok:false, error:"Need id and data" });
+    const { id, data, ext } = req.body || {};
+    if (!id || !data) return res.status(400).json({ ok: false, error: "Need id and data" });
 
     const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
-    const filePath = `${PATH_PREFIX}/${safeId}.json`;
+
+    // Расширение файла: html или json
+    const fileExt = (ext === "html") ? "html" : "json";
+    const filePath = `${PATH_PREFIX}/${safeId}.${fileExt}`;
 
     const headers = {
       "Authorization": `Bearer ${GH_TOKEN}`,
       "Accept": "application/vnd.github+json"
     };
 
+    // Проверяем существует ли файл (нужен sha для обновления)
     const getUrl = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}?ref=${GH_BRANCH}`;
     let sha = null;
-
     const getResp = await fetch(getUrl, { headers });
     if (getResp.ok) {
       const j = await getResp.json();
       sha = j.sha;
     }
 
-    const content = Buffer.from(JSON.stringify(data, null, 2)).toString("base64");
+    // Если HTML — data уже строка, если JSON — нужен stringify
+    let fileContent;
+    if (fileExt === "html") {
+      fileContent = typeof data === "string" ? data : JSON.stringify(data);
+    } else {
+      fileContent = JSON.stringify(data, null, 2);
+    }
 
-    await fetch(
+    const content = Buffer.from(fileContent).toString("base64");
+
+    const putResp = await fetch(
       `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}`,
       {
         method: "PUT",
@@ -75,13 +85,20 @@ app.post("/publish", async (req, res) => {
       }
     );
 
+    if (!putResp.ok) {
+      const errText = await putResp.text();
+      console.error("GitHub API error:", putResp.status, errText);
+      return res.status(500).json({ ok: false, error: "GitHub API: " + putResp.status });
+    }
+
     res.json({
       ok: true,
-      url: `${PAGES_BASE_URL}/${PATH_PREFIX}/${safeId}.json`
+      url: `${PAGES_BASE_URL}/${PATH_PREFIX}/${safeId}.${fileExt}`
     });
 
   } catch (e) {
-    res.status(500).json({ ok:false, error:String(e.message) });
+    console.error("Publish error:", e);
+    res.status(500).json({ ok: false, error: String(e.message) });
   }
 });
 
