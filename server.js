@@ -38,14 +38,19 @@ app.post("/publish", async (req, res) => {
     mustEnv("GH_OWNER", GH_OWNER);
     mustEnv("GH_REPO", GH_REPO);
 
-    const { id, data, ext } = req.body || {};
-    if (!id || !data) return res.status(400).json({ ok: false, error: "Need id and data" });
+    // Поддерживаем оба варианта: content (строка) или data (объект)
+    const { id, content, data } = req.body || {};
+    const payload = content || data;
+    if (!id || !payload) {
+      return res.status(400).json({ ok: false, error: "Need id and content/data" });
+    }
 
     const safeId = id.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64);
+    const filePath = `${PATH_PREFIX}/${safeId}.json`;
 
-    // Поддержка .html и .json файлов
-    const fileExt = (ext === "html") ? "html" : "json";
-    const filePath = `${PATH_PREFIX}/${safeId}.${fileExt}`;
+    // Если content — это строка (JSON.stringify от редактора), используем как есть
+    // Если data — это объект, stringify
+    const fileContent = typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
 
     const headers = {
       "Authorization": `Bearer ${GH_TOKEN}`,
@@ -61,15 +66,7 @@ app.post("/publish", async (req, res) => {
       sha = j.sha;
     }
 
-    // HTML = строка как есть, JSON = stringify
-    let fileContent;
-    if (fileExt === "html") {
-      fileContent = typeof data === "string" ? data : JSON.stringify(data);
-    } else {
-      fileContent = JSON.stringify(data, null, 2);
-    }
-
-    const content = Buffer.from(fileContent).toString("base64");
+    const base64content = Buffer.from(fileContent).toString("base64");
 
     const putResp = await fetch(
       `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${filePath}`,
@@ -78,7 +75,7 @@ app.post("/publish", async (req, res) => {
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({
           message: `publish ${safeId}`,
-          content,
+          content: base64content,
           branch: GH_BRANCH,
           ...(sha ? { sha } : {})
         })
@@ -93,7 +90,7 @@ app.post("/publish", async (req, res) => {
 
     res.json({
       ok: true,
-      url: `${PAGES_BASE_URL}/${PATH_PREFIX}/${safeId}.${fileExt}`
+      url: `${PAGES_BASE_URL}/${PATH_PREFIX}/${safeId}.json`
     });
 
   } catch (e) {
